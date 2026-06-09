@@ -1,2 +1,33 @@
 # Binary IQ/capture files
 *.bin
+
+# Independent repositories kept outside this workspace repo
+fingerprint_localization/
+gr-lora_sdr/
+
+# Build outputs and generated files
+build/
+build*/
+Objects/
+Listings/
+__pycache__/
+*.pyc
+*.o
+*.obj
+*.d
+*.crf
+*.axf
+*.hex
+*.map
+*.lst
+*.lnp
+*.sct
+*.htm
+*.iex
+*.dep
+*.Bak
+*.bak
+
+# Local runtime scratch files
+*.log
+temp_*.txt
