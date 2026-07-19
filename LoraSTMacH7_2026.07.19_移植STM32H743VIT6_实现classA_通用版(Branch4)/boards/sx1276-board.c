@@ -1,0 +1,206 @@
+/*!
+ * \file      sx1276mb1las-board.c
+ *
+ * \brief     Target board SX1276MB1LAS shield driver implementation
+ *
+ * \copyright Revised BSD License, see section \ref LICENSE.
+ *
+ * \code
+ *                ______                              _
+ *               / _____)             _              | |
+ *              ( (____  _____ ____ _| |_ _____  ____| |__
+ *               \____ \| ___ |    (_   _) ___ |/ ___)  _ \
+ *               _____) ) ____| | | || |_| ____( (___| | | |
+ *              (______/|_____)_|_|_| \__)_____)\____)_| |_|
+ *              (C)2013-2017 Semtech
+ *
+ * \endcode
+ *
+ * \author    Miguel Luis ( Semtech )
+ *
+ * \author    Gregory Cristian ( Semtech )
+ */
+#include <stdlib.h>
+#include "utilities.h"
+#include "board-config.h"
+#include "delay.h"
+#include "radio.h"
+#include "sx1276-board.h"
+
+/*!
+ * \brief Gets the board PA selection configuration
+ *
+ * \param [IN] channel Channel frequency in Hz
+ * \retval PaSelect RegPaConfig PaSelect value
+ */
+static uint8_t SX1276GetPaSelect( uint32_t channel );
+
+/*!
+ * Radio driver structure initialization
+ */
+const struct Radio_s Radio =
+{
+    SX1276Init,
+    SX1276GetStatus,
+    SX1276SetModem,
+    SX1276SetChannel,
+    SX1276IsChannelFree,
+    SX1276Random,
+    SX1276SetRxConfig,
+    SX1276SetTxConfig,
+    SX1276CheckRfFrequency,
+    SX1276GetTimeOnAir,
+    SX1276Send,
+    SX1276SetSleep,
+    SX1276SetStby,
+    SX1276SetRx,
+    SX1276StartCad,
+    SX1276SetTxContinuousWave,
+    SX1276ReadRssi,
+    SX1276Write,
+    SX1276Read,
+    SX1276WriteBuffer,
+    SX1276ReadBuffer,
+    SX1276SetMaxPayloadLength,
+    SX1276SetPublicNetwork,
+    SX1276GetWakeupTime,
+    NULL, // void ( *IrqProcess )( void )
+    NULL, // void ( *RxBoosted )( uint32_t timeout ) - SX126x Only
+    NULL, // void ( *SetRxDutyCycle )( uint32_t rxTime, uint32_t sleepTime ) - SX126x Only
+};
+
+void SX1276IoInit( void )
+{
+    GpioInit( &SX1276.Spi.Nss, RADIO_NSS, PIN_OUTPUT, PIN_PUSH_PULL, PIN_PULL_UP, 1 );
+
+    GpioInit( &SX1276.DIO0, RADIO_DIO_0, PIN_INPUT, PIN_PUSH_PULL, PIN_PULL_UP, 0 );
+    GpioInit( &SX1276.DIO1, RADIO_DIO_1, PIN_INPUT, PIN_PUSH_PULL, PIN_PULL_UP, 0 );
+    GpioInit( &SX1276.DIO2, RADIO_DIO_2, PIN_INPUT, PIN_PUSH_PULL, PIN_PULL_UP, 0 );
+    GpioInit( &SX1276.DIO3, RADIO_DIO_3, PIN_INPUT, PIN_PUSH_PULL, PIN_PULL_UP, 0 );
+    GpioInit( &SX1276.DIO4, RADIO_DIO_4, PIN_INPUT, PIN_PUSH_PULL, PIN_PULL_UP, 0 );
+    GpioInit( &SX1276.DIO5, RADIO_DIO_5, PIN_INPUT, PIN_PUSH_PULL, PIN_PULL_UP, 0 );
+}
+
+void SX1276IoIrqInit( DioIrqHandler **irqHandlers )
+{
+    GpioSetInterrupt( &SX1276.DIO0, IRQ_RISING_EDGE, IRQ_HIGH_PRIORITY, irqHandlers[0] );
+    GpioSetInterrupt( &SX1276.DIO1, IRQ_RISING_EDGE, IRQ_HIGH_PRIORITY, irqHandlers[1] );
+    GpioSetInterrupt( &SX1276.DIO2, IRQ_RISING_EDGE, IRQ_HIGH_PRIORITY, irqHandlers[2] );
+    GpioSetInterrupt( &SX1276.DIO3, IRQ_RISING_EDGE, IRQ_HIGH_PRIORITY, irqHandlers[3] );
+    GpioSetInterrupt( &SX1276.DIO4, IRQ_RISING_EDGE, IRQ_HIGH_PRIORITY, irqHandlers[4] );
+    GpioSetInterrupt( &SX1276.DIO5, IRQ_RISING_EDGE, IRQ_HIGH_PRIORITY, irqHandlers[5] );
+}
+
+void SX1276IoDeInit( void )
+{
+    GpioInit( &SX1276.Spi.Nss, RADIO_NSS, PIN_OUTPUT, PIN_PUSH_PULL, PIN_NO_PULL, 1 );
+
+    GpioInit( &SX1276.DIO0, RADIO_DIO_0, PIN_INPUT, PIN_PUSH_PULL, PIN_NO_PULL, 0 );
+    GpioInit( &SX1276.DIO1, RADIO_DIO_1, PIN_INPUT, PIN_PUSH_PULL, PIN_NO_PULL, 0 );
+    GpioInit( &SX1276.DIO2, RADIO_DIO_2, PIN_INPUT, PIN_PUSH_PULL, PIN_NO_PULL, 0 );
+    GpioInit( &SX1276.DIO3, RADIO_DIO_3, PIN_INPUT, PIN_PUSH_PULL, PIN_NO_PULL, 0 );
+    GpioInit( &SX1276.DIO4, RADIO_DIO_4, PIN_INPUT, PIN_PUSH_PULL, PIN_NO_PULL, 0 );
+    GpioInit( &SX1276.DIO5, RADIO_DIO_5, PIN_INPUT, PIN_PUSH_PULL, PIN_NO_PULL, 0 );
+}
+
+void SX1276Reset( void )
+{
+    // Set RESET pin to 0
+    GpioInit( &SX1276.Reset, RADIO_RESET, PIN_OUTPUT, PIN_PUSH_PULL, PIN_NO_PULL, 0 );
+
+    // Wait 1 ms
+    DelayMs( 1 );
+
+    // Configure RESET as input
+    GpioInit( &SX1276.Reset, RADIO_RESET, PIN_INPUT, PIN_PUSH_PULL, PIN_NO_PULL, 1 );
+
+    // Wait 6 ms
+    DelayMs( 6 );
+}
+
+void SX1276SetRfTxPower( int8_t power )
+{
+    uint8_t paConfig = 0;
+    uint8_t paDac = 0;
+
+    paConfig = SX1276Read( REG_PACONFIG );
+    paDac = SX1276Read( REG_PADAC );
+
+    paConfig = ( paConfig & RF_PACONFIG_PASELECT_MASK ) | SX1276GetPaSelect( SX1276.Settings.Channel );
+
+    if( ( paConfig & RF_PACONFIG_PASELECT_PABOOST ) == RF_PACONFIG_PASELECT_PABOOST )
+    {
+        if( power > 17 )
+        {
+            paDac = ( paDac & RF_PADAC_20DBM_MASK ) | RF_PADAC_20DBM_ON;
+        }
+        else
+        {
+            paDac = ( paDac & RF_PADAC_20DBM_MASK ) | RF_PADAC_20DBM_OFF;
+        }
+        if( ( paDac & RF_PADAC_20DBM_ON ) == RF_PADAC_20DBM_ON )
+        {
+            if( power < 5 )
+            {
+                power = 5;
+            }
+            /* Ra-02 V1.1 specifies +18 dBm as the module maximum. */
+            if( power > 18 )
+            {
+                power = 18;
+            }
+            paConfig = ( paConfig & RF_PACONFIG_OUTPUTPOWER_MASK ) | ( uint8_t )( ( uint16_t )( power - 5 ) & 0x0F );
+        }
+        else
+        {
+            if( power < 2 )
+            {
+                power = 2;
+            }
+            if( power > 17 )
+            {
+                power = 17;
+            }
+            paConfig = ( paConfig & RF_PACONFIG_OUTPUTPOWER_MASK ) | ( uint8_t )( ( uint16_t )( power - 2 ) & 0x0F );
+        }
+    }
+    else
+    {
+        if( power > 0 )
+        {
+            if( power > 15 )
+            {
+                power = 15;
+            }
+            paConfig = ( paConfig & RF_PACONFIG_MAX_POWER_MASK & RF_PACONFIG_OUTPUTPOWER_MASK ) | ( 7 << 4 ) | ( power );
+        }
+        else
+        {
+            if( power < -4 )
+            {
+                power = -4;
+            }
+            paConfig = ( paConfig & RF_PACONFIG_MAX_POWER_MASK & RF_PACONFIG_OUTPUTPOWER_MASK ) | ( 0 << 4 ) | ( power + 4 );
+        }
+    }
+    SX1276Write( REG_PACONFIG, paConfig );
+    SX1276Write( REG_PADAC, paDac );
+}
+
+static uint8_t SX1276GetPaSelect( uint32_t channel )
+{
+    if( channel <= RF_MID_BAND_THRESH )
+    {
+        return RF_PACONFIG_PASELECT_PABOOST;
+    }
+    else
+    {
+        return RF_PACONFIG_PASELECT_RFO;
+    }
+}
+
+bool SX1276CheckRfFrequency( uint32_t frequency )
+{
+    /* Ai-Thinker Ra-02 (SX1278) specified operating range. */
+    return ( frequency >= 410000000UL ) && ( frequency <= 525000000UL );
+}

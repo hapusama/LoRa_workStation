@@ -4,6 +4,9 @@
 # Independent repositories kept outside this workspace repo
 fingerprint_localization/
 gr-lora_sdr/
+tmp/
+.vscode/
+.agents/
 
 # Build outputs and generated files
 build/
